@@ -1,0 +1,119 @@
+interface axi #(
+  param ID_WIDTH  : u32 = 4             ,
+  param ADDR_WIDTH: u32 = 32            ,
+  param DATA_WIDTH: u32 = 32            ,
+  local STRB_WIDTH: u32 = DATA_WIDTH / 8,
+
+) {
+  var awid   : logic<ID_WIDTH>  ;
+  var awaddr : logic<ADDR_WIDTH>;
+  var awlen  : logic<8>         ;
+  var awsize : logic<3>         ;
+  var awburst: logic<2>         ;
+  var awlock : logic            ;
+  var awcache: logic<4>         ;
+  var awprot : logic<3>         ;
+  var awvalid: logic            ;
+  var awready: logic            ;
+  var wdata  : logic<DATA_WIDTH>;
+  var wstrb  : logic<STRB_WIDTH>;
+  var wlast  : logic            ;
+  var wvalid : logic            ;
+  var wready : logic            ;
+  var bready : logic            ;
+  var bid    : logic<ID_WIDTH>  ;
+  var bresp  : logic<2>         ;
+  var bvalid : logic            ;
+  var arid   : logic<ID_WIDTH>  ;
+  var araddr : logic<ADDR_WIDTH>;
+  var arlen  : logic<8>         ;
+  var arsize : logic<3>         ;
+  var arburst: logic<2>         ;
+  var arlock : logic            ;
+  var arcache: logic<4>         ;
+  var arprot : logic<3>         ;
+  var arvalid: logic            ;
+  var arready: logic            ;
+  var rready : logic            ;
+  var rid    : logic<ID_WIDTH>  ;
+  var rdata  : logic<DATA_WIDTH>;
+  var rresp  : logic<2>         ;
+  var rlast  : logic            ;
+  var rvalid : logic            ;
+
+  modport master {
+    awid   : output,
+    awaddr : output,
+    awlen  : output,
+    awsize : output,
+    awburst: output,
+    awlock : output,
+    awcache: output,
+    awprot : output,
+    awvalid: output,
+    awready: input ,
+    wdata  : output,
+    wstrb  : output,
+    wlast  : output,
+    wvalid : output,
+    wready : input ,
+    bready : output,
+    bid    : input ,
+    bresp  : input ,
+    bvalid : input ,
+    arid   : output,
+    araddr : output,
+    arlen  : output,
+    arsize : output,
+    arburst: output,
+    arlock : output,
+    arcache: output,
+    arprot : output,
+    arvalid: output,
+    arready: input ,
+    rready : output,
+    rid    : input ,
+    rdata  : input ,
+    rresp  : input ,
+    rlast  : input ,
+    rvalid : input ,
+  }
+
+  modport slave {
+    awid   : input ,
+    awaddr : input ,
+    awlen  : input ,
+    awsize : input ,
+    awburst: input ,
+    awlock : input ,
+    awcache: input ,
+    awprot : input ,
+    awvalid: input ,
+    awready: output,
+    wdata  : input ,
+    wstrb  : input ,
+    wlast  : input ,
+    wvalid : input ,
+    wready : output,
+    bready : input ,
+    bid    : output,
+    bresp  : output,
+    bvalid : output,
+    arid   : input ,
+    araddr : input ,
+    arlen  : input ,
+    arsize : input ,
+    arburst: input ,
+    arlock : input ,
+    arcache: input ,
+    arprot : input ,
+    arvalid: input ,
+    arready: output,
+    rready : input ,
+    rid    : output,
+    rdata  : output,
+    rresp  : output,
+    rlast  : output,
+    rvalid : output,
+  }
+}

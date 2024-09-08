@@ -1,0 +1,455 @@
+//-------------------------------------------------------------------------------
+// top
+//-------------------------------------------------------------------------------
+
+module arty_top (
+  sys_clk     : input  `sys clock              ,
+  sys_rstn    : input       reset_async_low    ,
+  ddr3_dq     : inout       tri logic      <16>,
+  ddr3_dqs_n  : inout       tri logic      <2> ,
+  ddr3_dqs_p  : inout       tri logic      <2> ,
+  ddr3_addr   : output      logic          <14>,
+  ddr3_ba     : output      logic          <3> ,
+  ddr3_ras_n  : output      logic              ,
+  ddr3_cas_n  : output      logic              ,
+  ddr3_we_n   : output      logic              ,
+  ddr3_reset_n: output      logic              ,
+  ddr3_ck_p   : output      logic          <1> ,
+  ddr3_ck_n   : output      logic          <1> ,
+  ddr3_cke    : output      logic          <1> ,
+  ddr3_cs_n   : output      logic          <1> ,
+  ddr3_dm     : output      logic          <2> ,
+  ddr3_odt    : output      logic          <1> ,
+  led         : output      logic          <4> ,
+) {
+
+  var w_sys_clk: `mc     clock          ; // 166MHz
+  var w_clk_ref: `mc_ref clock          ; // 200MHz
+  var locked   : `sys    logic          ;
+  var mem_rstn : `sys    reset_async_low;
+
+  var clk                : clock          ; // ui_clk 83.333MHz
+  var srst               : reset_sync_high;
+  var rstn               : reset_async_low;
+  var init_calib_complete: logic          ;
+  var mig_locked         : logic          ;
+
+  inst m_axi: axi #(ID_WIDTH: 4, ADDR_WIDTH: 32, DATA_WIDTH: 32,);
+  inst s_axi: axi #(ID_WIDTH: 4, ADDR_WIDTH: 32, DATA_WIDTH: 128,);
+
+  //-------------------------------------------------------------------------------
+  // misc
+  //-------------------------------------------------------------------------------
+
+  unsafe (cdc) {
+    always_comb {
+      led[0] = locked;
+      led[1] = mig_locked;
+      led[2] = 1'b0;
+      led[3] = init_calib_complete;
+    }
+  }
+
+  //-------------------------------------------------------------------------------
+  // clocke/reset
+  //-------------------------------------------------------------------------------
+
+  var r_locked: `sys logic<8>;
+
+  unsafe (cdc) {
+    always_ff (sys_clk, sys_rstn) {
+      if_reset {
+        r_locked = '0;
+      } else if (!locked) {
+        r_locked = '0;
+      } else if (locked && r_locked != '1) {
+        r_locked = r_locked + 1;
+      }
+    }
+
+    always_ff (sys_clk, sys_rstn) {
+      if_reset {
+        mem_rstn = 0;
+      } else if (r_locked[7]) {
+        mem_rstn = 1;
+      } else {
+        mem_rstn = 0;
+      }
+    }
+
+    always_ff (clk) {
+      if (mig_locked) {
+        rstn = ~srst;
+      } else {
+        rstn = 0;
+      }
+    }
+  }
+
+  //-------------------------------------------------------------------------------
+  // mmcm
+  //-------------------------------------------------------------------------------
+
+  unsafe (cdc) {
+    inst u_mmcm: $sv::mmcm (
+      clk_in1 : sys_clk  ,
+      resetn  : sys_rstn ,
+      clk_out1: w_sys_clk, // 166MHz
+      clk_out2: w_clk_ref, // 200MHz
+      clk_out3: _        , // 25MHz for ether clock
+      locked  : locked   ,
+    );
+  }
+
+  //-------------------------------------------------------------------------------
+  // axi 32->128
+  //-------------------------------------------------------------------------------
+
+  // AW
+  var awf_full : logic   ;
+  var awf_empty: logic   ;
+  var w_awready: logic   ;
+  var w_wsel   : logic<2>;
+  var w_wstrb  : logic<4>;
+  var w_wready : logic   ;
+
+  always_comb {
+    w_awready     = s_axi.awready && !awf_full;
+    s_axi.awvalid = m_axi.awvalid && w_awready;
+    m_axi.awready = w_awready;
+  }
+
+  always_comb {
+    s_axi.awid    = m_axi.awid;
+    s_axi.awaddr  = {m_axi.awaddr[27:4], 4'b0};
+    s_axi.awlen   = m_axi.awlen;
+    s_axi.awsize  = m_axi.awsize;
+    s_axi.awburst = m_axi.awburst;
+    s_axi.awlock  = m_axi.awlock;
+    s_axi.awcache = m_axi.awcache;
+    s_axi.awprot  = m_axi.awprot;
+  }
+
+  inst u_awfifo: std::fifo #(
+    WIDTH: 4 + 2,
+    DEPTH: 2    ,
+  ) (
+    i_clk        : clk                            ,
+    i_rst        : ~rstn                          ,
+    i_clear      : 1'b0                           ,
+    o_empty      : awf_empty                      ,
+    o_almost_full: _                              ,
+    o_full       : awf_full                       ,
+    o_word_count : _                              ,
+    i_push       : m_axi.awvalid && m_axi.awready ,
+    i_data       : {m_axi.wstrb, m_axi.awaddr[3:2]},
+    i_pop        : s_axi.wvalid && s_axi.wready   ,
+    o_data       : {w_wstrb, w_wsel}               ,
+  );
+
+  // W
+  always_comb {
+    w_wready     = s_axi.wready && !awf_empty;
+    s_axi.wvalid = m_axi.wvalid && w_wready;
+    m_axi.wready = w_wready;
+  }
+
+  assign s_axi.wdata = {m_axi.wdata repeat 4};
+
+  assign s_axi.wstrb = case w_wsel {
+    2'h0   : {12'b0, w_wstrb},
+    2'h1   : {8'b0, w_wstrb, 4'b0},
+    2'h2   : {4'b0, w_wstrb, 8'b0},
+    2'h3   : {w_wstrb, 12'b0},
+    default: 0,
+  };
+
+  assign s_axi.wlast = m_axi.wlast;
+
+  // B
+  always_comb {
+    m_axi.bid    = s_axi.bid;
+    m_axi.bresp  = s_axi.bresp;
+    m_axi.bvalid = s_axi.bvalid;
+    s_axi.bready = m_axi.bready;
+  }
+
+  // AR
+  var arf_full : logic   ;
+  var arf_empty: logic   ;
+  var w_arready: logic   ;
+  var w_rsel   : logic<2>;
+
+  always_comb {
+    w_arready     = s_axi.arready && !arf_full;
+    s_axi.arvalid = m_axi.arvalid && w_arready;
+    m_axi.arready = w_arready;
+  }
+
+  always_comb {
+    s_axi.arid    = m_axi.arid;
+    s_axi.araddr  = {m_axi.araddr[27:4], 4'b0};
+    s_axi.arlen   = m_axi.arlen;
+    s_axi.arsize  = m_axi.arsize;
+    s_axi.arburst = m_axi.arburst;
+    s_axi.arlock  = m_axi.arlock;
+    s_axi.arcache = m_axi.arcache;
+    s_axi.arprot  = m_axi.arprot;
+  }
+
+  inst u_arfifo: std::fifo #(
+    WIDTH: 2,
+    DEPTH: 2,
+  ) (
+    i_clk        : clk                           ,
+    i_rst        : ~rstn                         ,
+    i_clear      : 1'b0                          ,
+    o_empty      : arf_empty                     ,
+    o_almost_full: _                             ,
+    o_full       : arf_full                      ,
+    o_word_count : _                             ,
+    i_push       : m_axi.arvalid && m_axi.arready,
+    i_data       : m_axi.araddr[3:2]             ,
+    i_pop        : m_axi.rvalid && m_axi.rready  ,
+    o_data       : w_rsel                        ,
+  );
+
+  // R
+  assign m_axi.rvalid = s_axi.rvalid;
+  assign m_axi.rid    = s_axi.rid;
+
+  assign m_axi.rdata = case (w_rsel) {
+    2'h0   : s_axi.rdata[31:0],
+    2'h1   : s_axi.rdata[63:32],
+    2'h2   : s_axi.rdata[95:64],
+    2'h3   : s_axi.rdata[127:96],
+    default: 0,
+  };
+
+  assign m_axi.rresp  = s_axi.rresp;
+  assign m_axi.rlast  = s_axi.rlast;
+  assign s_axi.rready = m_axi.rready;
+
+  //-------------------------------------------------------------------------------
+  // jtag
+  //-------------------------------------------------------------------------------
+
+  inst u_jtag_axi: $sv::jtag_axi (
+    aclk         : clk          ,
+    aresetn      : rstn         ,
+    m_axi_awid   : m_axi.awid   ,
+    m_axi_awaddr : m_axi.awaddr ,
+    m_axi_awlen  : m_axi.awlen  ,
+    m_axi_awsize : m_axi.awsize ,
+    m_axi_awburst: m_axi.awburst,
+    m_axi_awlock : m_axi.awlock ,
+    m_axi_awcache: m_axi.awcache,
+    m_axi_awprot : m_axi.awprot ,
+    m_axi_awqos  : _            ,
+    m_axi_awvalid: m_axi.awvalid,
+    m_axi_awready: m_axi.awready,
+    m_axi_wdata  : m_axi.wdata  ,
+    m_axi_wstrb  : m_axi.wstrb  ,
+    m_axi_wlast  : m_axi.wlast  ,
+    m_axi_wvalid : m_axi.wvalid ,
+    m_axi_wready : m_axi.wready ,
+    m_axi_bid    : m_axi.bid    ,
+    m_axi_bresp  : m_axi.bresp  ,
+    m_axi_bvalid : m_axi.bvalid ,
+    m_axi_bready : m_axi.bready ,
+    m_axi_arid   : m_axi.arid   ,
+    m_axi_araddr : m_axi.araddr ,
+    m_axi_arlen  : m_axi.arlen  ,
+    m_axi_arsize : m_axi.arsize ,
+    m_axi_arburst: m_axi.arburst,
+    m_axi_arlock : m_axi.arlock ,
+    m_axi_arcache: m_axi.arcache,
+    m_axi_arprot : m_axi.arprot ,
+    m_axi_arqos  : _            ,
+    m_axi_arvalid: m_axi.arvalid,
+    m_axi_arready: m_axi.arready,
+    m_axi_rid    : m_axi.rid    ,
+    m_axi_rdata  : m_axi.rdata  ,
+    m_axi_rresp  : m_axi.rresp  ,
+    m_axi_rlast  : m_axi.rlast  ,
+    m_axi_rvalid : m_axi.rvalid ,
+    m_axi_rready : m_axi.rready ,
+  );
+
+  //-------------------------------------------------------------------------------
+  // mig
+  //-------------------------------------------------------------------------------
+
+  unsafe (cdc) {
+    inst u_mig: $sv::mig (
+      ddr3_addr                         ,
+      ddr3_ba                           ,
+      ddr3_cas_n                        ,
+      ddr3_ck_n                         ,
+      ddr3_ck_p                         ,
+      ddr3_cke                          ,
+      ddr3_ras_n                        ,
+      ddr3_we_n                         ,
+      ddr3_dq                           ,
+      ddr3_dqs_n                        ,
+      ddr3_dqs_p                        ,
+      ddr3_reset_n                      ,
+      init_calib_complete               ,
+      ddr3_cs_n                         ,
+      ddr3_dm                           ,
+      ddr3_odt                          ,
+      ui_clk             : clk          ,
+      ui_clk_sync_rst    : srst         ,
+      mmcm_locked        : mig_locked   ,
+      aresetn            : rstn         ,
+      app_sr_req         : 1'b0         ,
+      app_ref_req        : 1'b0         ,
+      app_zq_req         : 1'b0         ,
+      app_sr_active      : _            ,
+      app_ref_ack        : _            ,
+      app_zq_ack         : _            ,
+      s_axi_awid         : s_axi.awid   ,
+      s_axi_awaddr       : s_axi.awaddr ,
+      s_axi_awlen        : s_axi.awlen  ,
+      s_axi_awsize       : s_axi.awsize ,
+      s_axi_awburst      : s_axi.awburst,
+      s_axi_awlock       : s_axi.awlock ,
+      s_axi_awcache      : s_axi.awcache,
+      s_axi_awprot       : s_axi.awprot ,
+      s_axi_awqos        : 4'h0         ,
+      s_axi_awvalid      : s_axi.awvalid,
+      s_axi_awready      : s_axi.awready,
+      s_axi_wdata        : s_axi.wdata  ,
+      s_axi_wstrb        : s_axi.wstrb  ,
+      s_axi_wlast        : s_axi.wlast  ,
+      s_axi_wvalid       : s_axi.wvalid ,
+      s_axi_wready       : s_axi.wready ,
+      s_axi_bid          : s_axi.bid    ,
+      s_axi_bresp        : s_axi.bresp  ,
+      s_axi_bvalid       : s_axi.bvalid ,
+      s_axi_bready       : s_axi.bready ,
+      s_axi_arid         : s_axi.arid   ,
+      s_axi_araddr       : s_axi.araddr ,
+      s_axi_arlen        : s_axi.arlen  ,
+      s_axi_arsize       : s_axi.arsize ,
+      s_axi_arburst      : s_axi.arburst,
+      s_axi_arlock       : s_axi.arlock ,
+      s_axi_arcache      : s_axi.arcache,
+      s_axi_arprot       : s_axi.arprot ,
+      s_axi_arqos        : 4'h0         ,
+      s_axi_arvalid      : s_axi.arvalid,
+      s_axi_arready      : s_axi.arready,
+      s_axi_rid          : s_axi.rid    ,
+      s_axi_rdata        : s_axi.rdata  ,
+      s_axi_rresp        : s_axi.rresp  ,
+      s_axi_rlast        : s_axi.rlast  ,
+      s_axi_rvalid       : s_axi.rvalid ,
+      s_axi_rready       : s_axi.rready ,
+      sys_clk_i          : w_sys_clk    ,
+      clk_ref_i          : w_clk_ref    ,
+      device_temp        : _            ,
+      sys_rst            : mem_rstn     ,
+    );
+  }
+}
+
+//-------------------------------------------------------------------------------
+// test
+//-------------------------------------------------------------------------------
+
+#[test(test_hello)]
+embed (inline) sv{{{
+  
+  module test_hello;
+    initial begin
+      $display("R/W test");
+    end
+  endmodule
+  }}}
+
+// #[test(test_ddr3)]
+// embed (inline) sv{{{
+// module test_ddr3;
+//    bit          clk = 0;
+//    bit          rstn = 0;
+//    bit   [3:0]  led;
+
+//    wire         ddr3_reset_n;
+//    wire  [15:0] ddr3_dq;
+//    wire  [1:0]  ddr3_dqs_p;
+//    wire  [1:0]  ddr3_dqs_n;
+//    wire  [13:0] ddr3_addr;
+//    wire  [2:0]  ddr3_ba;
+//    wire         ddr3_ras_n;
+//    wire         ddr3_cas_n;
+//    wire         ddr3_we_n;
+//    wire  [0:0]  ddr3_ck_p;
+//    wire  [0:0]  ddr3_ck_n;
+//    wire  [0:0]  ddr3_cke;
+//    wire  [0:0] 	ddr3_cs_n;
+//    wire  [1:0]  ddr3_dm;
+//    wire  [0:0]  ddr3_odt;
+
+//    initial begin
+//       forever
+// 	#5ns clk = ~clk; // 100MHz
+//    end
+
+//    initial begin
+//       rstn = 0;
+//       #10ns;
+//       rstn = 1;
+
+//       wait(dut.init_calib_complete);
+//       $display("Calibration Done");
+
+//       #1us;
+//       $stop(0);
+//    end
+
+//    glbl glbl();
+
+//    arty_top dut (
+//      .ddr3_dq      (ddr3_dq),
+//      .ddr3_dqs_n   (ddr3_dqs_n),
+//      .ddr3_dqs_p   (ddr3_dqs_p),
+//      .ddr3_addr	   (ddr3_addr),
+//      .ddr3_ba	   (ddr3_ba),
+//      .ddr3_ras_n   (ddr3_ras_n),
+//      .ddr3_cas_n   (ddr3_cas_n),
+//      .ddr3_we_n	   (ddr3_we_n),
+//      .ddr3_reset_n (ddr3_reset_n),
+//      .ddr3_ck_p	   (ddr3_ck_p),
+//      .ddr3_ck_n	   (ddr3_ck_n),
+//      .ddr3_cke	   (ddr3_cke),
+//      .ddr3_cs_n	   (ddr3_cs_n),
+//      .ddr3_dm      (ddr3_dm),
+//      .ddr3_odt     (ddr3_odt),
+//      .sys_clk      (clk),
+//      .sys_rstn     (rstn),
+//      .led          (led)
+//    );
+
+
+//    ddr3_model u_comp_ddr3
+//    (
+//      .rst_n     (ddr3_reset_n),
+//      .ck        (ddr3_ck_p),
+//      .ck_n      (ddr3_ck_n),
+//      .cke       (ddr3_cke),
+//      .cs_n      (ddr3_cs_n),
+//      .ras_n     (ddr3_ras_n),
+//      .cas_n     (ddr3_cas_n),
+//      .we_n      (ddr3_we_n),
+//      .dm_tdqs   (ddr3_dm),
+//      .ba        (ddr3_ba),
+//      .addr      (ddr3_addr),
+//      .dq        (ddr3_dq),
+//      .dqs       (ddr3_dqs_p),
+//      .dqs_n     (ddr3_dqs_n),
+//      .tdqs_n    (),
+//      .odt       (ddr3_odt)
+//     );
+
+// endmodule
+// }}}

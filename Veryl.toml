@@ -1,0 +1,28 @@
+[project]
+name = "arty"
+version = "0.1.0"
+
+[build]
+omit_project_prefix = true
+
+[format]
+indent_width = 2
+
+[test]
+simulator = "vivado"
+
+[test.vivado]
+compile_args = ["-i", "ip/output/mmcm",
+                "-i", "ip/output/mig",
+                "-i", "ip/output/mig/mig/example_design/sim",
+                "-i", "ip/output/jtag_axi",]
+		
+elaborate_args = ["-i", "ip/output/mmcm",]
+
+simulate_args = ["-L", "unisims_ver",
+                 "-L", "secureip",
+                 "-timescale", "1ns/1ps",
+                 "-stat",
+                 "-d", "x2Gb",
+                 "-d", "sg15E",
+                 "-d", "x16",]
