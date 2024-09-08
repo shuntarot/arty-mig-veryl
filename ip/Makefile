@@ -1,4 +1,4 @@
-# export BOARD_FILES = $(realpath ../board_files)
+# export BOARD_FILES = $(realpath ../../board_files)
 output := output
 
 default: build
