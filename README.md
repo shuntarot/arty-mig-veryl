@@ -2,6 +2,15 @@
 
 Vivado 2024.1 or higher is required.
 
+## Build RTL
+
+Generate system verylog code from veryl code. Run veryl command in top directory.
+
+```
+veryl build
+```
+
+
 ## Build IP
 
 Need IP generation before top-level synthesis or simulation.
