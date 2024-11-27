@@ -130,20 +130,20 @@ module arty_top (
     s_axi.awprot  = m_axi.awprot;
   }
 
-  inst u_awfifo: std::fifo #(
+  inst u_awfifo: $std::fifo #(
     WIDTH: 4 + 2,
     DEPTH: 2    ,
   ) (
-    i_clk        : clk                            ,
-    i_rst        : ~rstn                          ,
-    i_clear      : 1'b0                           ,
-    o_empty      : awf_empty                      ,
-    o_almost_full: _                              ,
-    o_full       : awf_full                       ,
-    o_word_count : _                              ,
-    i_push       : m_axi.awvalid && m_axi.awready ,
+    i_clk        : clk                             ,
+    i_rst        : ~rstn                           ,
+    i_clear      : 1'b0                            ,
+    o_empty      : awf_empty                       ,
+    o_almost_full: _                               ,
+    o_full       : awf_full                        ,
+    o_word_count : _                               ,
+    i_push       : m_axi.awvalid && m_axi.awready  ,
     i_data       : {m_axi.wstrb, m_axi.awaddr[3:2]},
-    i_pop        : s_axi.wvalid && s_axi.wready   ,
+    i_pop        : s_axi.wvalid && s_axi.wready    ,
     o_data       : {w_wstrb, w_wsel}               ,
   );
 
@@ -196,7 +196,7 @@ module arty_top (
     s_axi.arprot  = m_axi.arprot;
   }
 
-  inst u_arfifo: std::fifo #(
+  inst u_arfifo: $std::fifo #(
     WIDTH: 2,
     DEPTH: 2,
   ) (

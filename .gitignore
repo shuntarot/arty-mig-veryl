@@ -7,6 +7,7 @@ output
 *.xpr
 *.html
 *.xml
-*.f
+arty.f
 *.sv.map
 target/
+dependencies/

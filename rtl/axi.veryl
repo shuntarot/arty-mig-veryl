@@ -2,7 +2,7 @@ interface axi #(
   param ID_WIDTH  : u32 = 4             ,
   param ADDR_WIDTH: u32 = 32            ,
   param DATA_WIDTH: u32 = 32            ,
-  local STRB_WIDTH: u32 = DATA_WIDTH / 8,
+  const STRB_WIDTH: u32 = DATA_WIDTH / 8,
 
 ) {
   var awid   : logic<ID_WIDTH>  ;
